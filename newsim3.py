@@ -58,11 +58,11 @@ def init_modem(ser):
 
     # Check result
     resp = send_at(ser, '', wait=0)  # flush buffer
-    if f'+CIPOPEN: {SOCKET_ID},0' in resp:
-        print("✅ TCP socket open")
-    else:
-        print("🚨 Socket open failed:\n", resp)
-        sys.exit(1)
+    # if f'+CIPOPEN: {SOCKET_ID},0' in resp:
+    #     print("✅ TCP socket open")
+    # else:
+    #     print("🚨 Socket open failed:\n", resp)
+    #     sys.exit(1)
 
 # === SEND SENSOR DATA AS JSON ===
 def send_json_data(ser, params: dict):
