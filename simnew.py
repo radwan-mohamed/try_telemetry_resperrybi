@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 import serial
 import time
-import random
 import sys
 
 # === CONFIGURATION ===
-AT_PORT   = '/dev/serial0'                   # Pi‐header UART in Pi-mode
-BAUD      = 115200                            # or 115200 if that’s what your HAT needs
-APN       = 'internet.orange.co.bw'         # your APN
-HOST      = 'merlet.alwaysdata.net'         # your server
-ENDPOINT  = '/endpoint.php?value='          # GET endpoint
+MODEM_PORT = '/dev/serial0'         # UART to SIM7600 (GPIO pins)
+DATA_PORT  = '/dev/ttyUSB5'         # USB serial for sensor readings
+BAUD_MODEM = 115200
+BAUD_DATA  = 115200
+APN       = 'internet.orange.co.bw'
+HOST      = 'merlet.alwaysdata.net'
+ENDPOINT  = '/endpoint.php?'
 SOCKET_ID = 0
 
-# === SIMULATED SENSORS ===
-SENSORS = {
-    'RPM':  lambda: random.randint(0, 8000),
-    'TEMP': lambda: round(random.uniform(20.0, 100.0), 1),
-    'VOLT': lambda: round(random.uniform(0.0, 12.0), 2),
-}
-
-# === AT‐COMMAND HELPERS ===
+# === AT-COMMAND HELPERS ===
 def send_at(ser, cmd, wait=1):
     ser.write((cmd + '\r\n').encode())
-    time.sleep(wait)  # small builtin delay to let modem echo
+    time.sleep(wait)
     return ser.read_all().decode(errors='ignore')
 
 def wait_for(ser, keyword, timeout=5):
@@ -34,9 +28,8 @@ def wait_for(ser, keyword, timeout=5):
             return True
     return False
 
-# === MODEM INIT & SOCKET OPEN ===
+# === MODEM INIT & TCP SOCKET OPEN ===
 def init_modem(ser):
-    # Basic checks + APN + GPRS
     for cmd, d in [
         ('AT', 0.5), ('ATE0', 0.5),
         ('AT+CPIN?', 0.5), ('AT+CGATT?', 0.5),
@@ -45,72 +38,78 @@ def init_modem(ser):
     ]:
         print(send_at(ser, cmd, d), end='')
 
-    # Open one persistent TCP socket
     oc = f'AT+CIPOPEN={SOCKET_ID},"TCP","{HOST}",80'
     ser.write((oc + '\r\n').encode())
     print(f">>> Sent: {oc}")
 
-    # Grab both the immediate OK and the later +CIPOPEN URC
     time.sleep(2)
     im = ser.read_all().decode(errors='ignore')
     time.sleep(3)
     late = ser.read_all().decode(errors='ignore')
-
     combo = im + late
+
     if f'+CIPOPEN: {SOCKET_ID},0' in combo:
         print("✅ TCP socket open")
     else:
-        print("🚨 Socket open failed; dump:", repr(combo), file=sys.stderr)
+        print("🚨 Socket open failed:\n", combo)
         sys.exit(1)
 
-# === SEND ONE READING ===
-def send_data(ser, name, val):
+# === SEND ONE READING SET ===
+def send_data(ser, params: dict):
     payload = (
-        f'GET {ENDPOINT}{name}={val} HTTP/1.1\r\n'
-        f'Host: {HOST}\r\n'
-        'Connection: keep-alive\r\n'
-        '\r\n'
+        f"GET {ENDPOINT}" +
+        '&'.join([f"{k}={v}" for k, v in params.items()]) +
+        " HTTP/1.1\r\n" +
+        f"Host: {HOST}\r\n" +
+        "Connection: keep-alive\r\n\r\n"
     )
     length = len(payload)
 
-    # clear old bytes, then send CIPSEND
     ser.reset_input_buffer()
     cmd = f'AT+CIPSEND={SOCKET_ID},{length}'
     ser.write((cmd + '\r\n').encode())
 
-    # wait for the '>' prompt
     if not wait_for(ser, '>', 1):
-        print(f"⚠️ No '>' for {name}; skipping", file=sys.stderr)
+        print("⚠️ No '>' prompt; skipping")
         return
 
-    # fire off the GET in one go
     ser.write(payload.encode())
-    print(f"📤 {name}={val}")
-
-    # drop any trailing bytes (no sleep)
+    print(f"📤 Sent: {params}")
     ser.read_all()
 
 # === MAIN LOOP ===
 def main():
     try:
-        ser = serial.Serial(AT_PORT, BAUD, timeout=0.5)
+        modem = serial.Serial(MODEM_PORT, BAUD_MODEM, timeout=0.5)
+        sensor = serial.Serial(DATA_PORT, BAUD_DATA, timeout=0.5)
     except Exception as e:
-        print(f"❌ Cannot open {AT_PORT}: {e}", file=sys.stderr)
+        print(f"❌ Serial open error: {e}")
         sys.exit(1)
 
-    init_modem(ser)
-    print("▶️ Sending readings continuously…")
+    init_modem(modem)
+    print("▶️ Reading sensor data and sending to server...")
 
     try:
         while True:
-            for name, fn in SENSORS.items():
-                send_data(ser, name, fn())
-            # *no* sleep here → loops immediately
+            line = sensor.readline().decode(errors='ignore').strip()
+            if not line:
+                continue
+
+            try:
+                # Example: "speed=50,temp=36.2,gear=3,fuel=80,rpm=3200"
+                entries = [x.split('=') for x in line.split(',')]
+                data = {k.strip().upper(): v.strip() for k, v in entries}
+                send_data(modem, data)
+            except Exception as e:
+                print(f"⚠️ Parse error: {e} | Line: {line}")
+
     except KeyboardInterrupt:
-        print("\n✋ Interrupted; closing socket…")
-        ser.write(f'AT+CIPCLOSE={SOCKET_ID}\r\n'.encode())
-        ser.write(b'AT+NETCLOSE\r\n')
-        ser.close()
+        print("\n✋ Ctrl+C detected, closing...")
+    finally:
+        modem.write(f'AT+CIPCLOSE={SOCKET_ID}\r\n'.encode())
+        modem.write(b'AT+NETCLOSE\r\n')
+        modem.close()
+        sensor.close()
 
 if __name__ == '__main__':
     main()
