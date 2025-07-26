@@ -6,7 +6,7 @@ import json
 
 # === CONFIGURATION ===
 MODEM_PORT = '/dev/serial0'         # UART to SIM7600 (GPIO pins)
-DATA_PORT  = '/dev/ttyUSB5'         # Updated: USB serial from STM32
+DATA_PORT  = '/dev/ttyUSB0'         # Updated: USB serial from STM32
 BAUD_MODEM = 115200
 BAUD_DATA  = 115200
 APN       = 'internet.orange.co.bw' # Your carrier's APN
@@ -82,11 +82,11 @@ def init_modem(ser):
     oc = f'AT+CIPOPEN={SOCKET_ID},"TCP","{HOST}",80'
     response = send_at(ser, oc, wait=8) # This can also take a while
     
-    # if f"+CIPOPEN: {SOCKET_ID},0" in response:
-    #     print("✅ TCP socket open successfully.")
-    # else:
-    #     print(f"🚨 Socket open failed. Final attempt failed. Response:\n{response}")
-    #     sys.exit(1)
+    if f"+CIPOPEN: {SOCKET_ID},0" in response:
+        print("✅ TCP socket open successfully.")
+    else:
+        print(f"🚨 Socket open failed. Final attempt failed. Response:\n{response}")
+        sys.exit(1)
 
 # === SEND SENSOR DATA AS JSON ===
 def send_json_data(ser, params: dict):
@@ -162,9 +162,11 @@ def main():
 
     try:
         while True:
+            print("...Checking for data from STM32...")
             line = sensor.readline().decode(errors='ignore').strip()
             if not line:
-                time.sleep(1) # Wait if no data
+                print("...No complete line received. Waiting...")
+                time.sleep(1) # Wait before trying again
                 continue
 
             print(f"\n📨 Received from STM32: {line}")
