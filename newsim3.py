@@ -47,10 +47,11 @@ def init_modem(ser):
         (f'AT+CGDCONT=1,"IP","{APN}"', 1),
         ('AT+NETOPEN', 2),
         ('AT+IPADDR',  1),
-    ]
+    ]   
     for cmd, w in steps:
         send_at(ser, cmd, w)
 
+    send_at(ser, f'AT+CIPCLOSE={SOCKET_ID}', wait=2)
     # Open TCP socket
     open_cmd = f'AT+CIPOPEN={SOCKET_ID},"TCP","{HOST}",80'
     send_at(ser, open_cmd, wait=5)
@@ -98,7 +99,7 @@ def send_json_data(ser, params: dict):
         "\r\n"
         f"{json_str}"
     )
-    print(f"\n🌐 Full HTTP payload:\n{http.strip()}")
+    print(f"\n🌐 Full HTTP payload:\n{http.strip()}")   
 
     # Send via AT+CIPSEND
     ser.reset_input_buffer()
