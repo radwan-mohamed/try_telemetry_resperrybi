@@ -13,11 +13,14 @@ HOST      = 'merlet.alwaysdata.net'
 ENDPOINT  = '/endpoint.php?'
 SOCKET_ID = 0
 
-# === AT-COMMAND HELPERS ===
+# === AT-COMMAND HELPERS ===        
 def send_at(ser, cmd, wait=1):
+    print(f"📡 Sending AT: {cmd}")
     ser.write((cmd + '\r\n').encode())
     time.sleep(wait)
-    return ser.read_all().decode(errors='ignore')
+    response = ser.read_all().decode(errors='ignore')
+    print(f"📩 Response: {response}")
+    return response
 
 def wait_for(ser, keyword, timeout=5):
     deadline = time.time() + timeout
@@ -63,6 +66,7 @@ def send_data(ser, params: dict):
         f"Host: {HOST}\r\n" +
         "Connection: keep-alive\r\n\r\n"
     )
+    print(f"🌐 Full HTTP payload:\n{payload}")
     length = len(payload)
 
     ser.reset_input_buffer()
@@ -76,6 +80,8 @@ def send_data(ser, params: dict):
     ser.write(payload.encode())
     print(f"📤 Sent: {params}")
     ser.read_all()
+    response = ser.read_all().decode(errors='ignore')
+    print(f"🛬 Modem response after send: {response}")
 
 # === MAIN LOOP ===
 def main():
